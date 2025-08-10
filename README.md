@@ -269,10 +269,10 @@ Este projeto está sob a licença MIT. Veja [LICENSE](LICENSE) para mais detalhe
 
 ## 👨‍💻 Autor
 
-**Seu Nome**
-- 💼 LinkedIn: [seu-perfil](https://linkedin.com/in/seu-perfil)
-- 🐙 GitHub: [seu-usuario](https://github.com/seu-usuario)
-- 📧 Email: seu.email@exemplo.com
+**Victor Soares**
+- 💼 LinkedIn: [seu-perfil](https://www.linkedin.com/in/victor-soares-ferreira-7b479718a/)
+- 🐙 GitHub: [Victor](https://github.com/victorsoaresferreiraa)
+- 📧 Email: victorsoaresferreira09@gmail.com
 
 ## 🙏 Agradecimentos
 
