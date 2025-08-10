@@ -1,0 +1,523 @@
+# etl_api_real.py - ETL Profissional com APIs Reais + SQLite
+
+import sqlite3
+import pandas as pd
+import requests
+from datetime import datetime, timedelta
+import json
+import os
+from typing import List, Dict, Optional
+import time
+import logging
+
+# Configuração de logging profissional (FIX para Windows)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/etl_pipeline.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class ETLFinanceiroReal:
+    """
+    ETL Profissional para dados financeiros REAIS
+    - Extract: APIs como Alpha Vantage, Yahoo Finance
+    - Transform: Limpeza e processamento com Pandas
+    - Load: Armazenamento em SQLite com schema profissional
+    """
+    
+    def __init__(self, db_path: str = "data/financial_data.db"):
+        """
+        Inicializa ETL com configurações profissionais
+        
+        Args:
+            db_path: Caminho para banco SQLite
+        """
+        self.db_path = db_path
+        self.api_key = "demo"  # Use sua chave real da Alpha Vantage
+        self.base_url = "https://www.alphavantage.co/query"
+        
+        # Criar estrutura de pastas
+        os.makedirs('data', exist_ok=True)
+        os.makedirs('logs', exist_ok=True)
+        os.makedirs('reports', exist_ok=True)
+        
+        # Inicializar banco
+        self._create_database_schema()
+        
+        logger.info("ETL Financeiro Real inicializado")
+    
+    def _create_database_schema(self):
+        """Cria schema profissional do banco de dados"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Tabela de ativos com metadados
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol VARCHAR(10) UNIQUE NOT NULL,
+                name TEXT,
+                exchange TEXT,
+                currency VARCHAR(3) DEFAULT 'USD',
+                sector TEXT,
+                market_cap REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Tabela de preços históricos
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS price_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol VARCHAR(10) NOT NULL,
+                date DATE NOT NULL,
+                open_price REAL NOT NULL,
+                high_price REAL NOT NULL,
+                low_price REAL NOT NULL,
+                close_price REAL NOT NULL,
+                adjusted_close REAL,
+                volume INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(symbol, date),
+                FOREIGN KEY (symbol) REFERENCES assets(symbol)
+            )
+        ''')
+        
+        # Tabela de indicadores técnicos
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS technical_indicators (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol VARCHAR(10) NOT NULL,
+                date DATE NOT NULL,
+                sma_20 REAL,
+                sma_50 REAL,
+                sma_200 REAL,
+                ema_12 REAL,
+                ema_26 REAL,
+                rsi REAL,
+                macd REAL,
+                macd_signal REAL,
+                bollinger_upper REAL,
+                bollinger_lower REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(symbol, date),
+                FOREIGN KEY (symbol) REFERENCES assets(symbol)
+            )
+        ''')
+        
+        # Tabela de métricas agregadas
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS portfolio_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date DATE NOT NULL,
+                total_value REAL,
+                daily_return REAL,
+                volatility REAL,
+                sharpe_ratio REAL,
+                max_drawdown REAL,
+                num_assets INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        logger.info("📊 Schema do banco criado com sucesso")
+    
+    def extract_from_alpha_vantage(self, symbol: str, 
+                                  function: str = "TIME_SERIES_DAILY_ADJUSTED") -> Optional[Dict]:
+        """
+        Extrai dados da API Alpha Vantage
+        
+        Args:
+            symbol: Código do ativo (ex: AAPL, MSFT)
+            function: Função da API
+            
+        Returns:
+            Dados JSON da API ou None se erro
+        """
+        try:
+            params = {
+                'function': function,
+                'symbol': symbol,
+                'apikey': self.api_key,
+                'outputsize': 'compact'  # últimos 100 dias
+            }
+            
+            logger.info(f"Extraindo dados de {symbol} da Alpha Vantage...")
+            response = requests.get(self.base_url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Verificar erros da API
+            if "Error Message" in data:
+                logger.error(f"Erro da API para {symbol}: {data['Error Message']}")
+                return None
+            
+            if "Note" in data:
+                logger.warning(f"Limite da API atingido: {data['Note']}")
+                return None
+            
+            logger.info(f"Dados de {symbol} extraidos com sucesso")
+            return data
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Erro de conexão para {symbol}: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Erro inesperado para {symbol}: {str(e)}")
+            return None
+    
+    def extract_from_yahoo_finance_fallback(self, symbol: str) -> Optional[Dict]:
+        """
+        Fallback usando Yahoo Finance (gratuito, sem API key)
+        """
+        try:
+            # URL do Yahoo Finance para CSV
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=100)
+            
+            url = f"https://query1.finance.yahoo.com/v7/finance/download/{symbol}"
+            params = {
+                'period1': int(start_date.timestamp()),
+                'period2': int(end_date.timestamp()),
+                'interval': '1d',
+                'events': 'history'
+            }
+            
+            logger.info(f"📡 Tentando Yahoo Finance para {symbol}...")
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            # Converter CSV para DataFrame
+            from io import StringIO
+            df = pd.read_csv(StringIO(response.text))
+            
+            # Converter para formato Alpha Vantage
+            data = {
+                "Meta Data": {
+                    "2. Symbol": symbol,
+                    "3. Last Refreshed": df['Date'].iloc[-1]
+                },
+                "Time Series (Daily)": {}
+            }
+            
+            for _, row in df.iterrows():
+                date_str = row['Date']
+                data["Time Series (Daily)"][date_str] = {
+                    "1. open": str(row['Open']),
+                    "2. high": str(row['High']),
+                    "3. low": str(row['Low']),
+                    "4. close": str(row['Close']),
+                    "5. adjusted close": str(row['Adj Close']),
+                    "6. volume": str(int(row['Volume']))
+                }
+            
+            logger.info(f"✅ Dados do Yahoo Finance para {symbol} extraídos")
+            return data
+            
+        except Exception as e:
+            logger.error(f"❌ Erro no Yahoo Finance para {symbol}: {str(e)}")
+            return None
+    
+    def transform_price_data(self, raw_data: Dict, symbol: str) -> Optional[pd.DataFrame]:
+        """
+        Transforma dados brutos em DataFrame estruturado
+        """
+        try:
+            if "Time Series (Daily)" not in raw_data:
+                logger.warning(f"Dados de serie temporal nao encontrados para {symbol}")
+                return None
+            
+            time_series = raw_data["Time Series (Daily)"]
+            
+            # Converter para DataFrame
+            df = pd.DataFrame(time_series).T
+            df.index = pd.to_datetime(df.index)
+            df = df.sort_index()
+            
+            # Renomear colunas
+            column_mapping = {
+                "1. open": "open_price",
+                "2. high": "high_price", 
+                "3. low": "low_price",
+                "4. close": "close_price",
+                "5. adjusted close": "adjusted_close",
+                "6. volume": "volume"
+            }
+            
+            df = df.rename(columns=column_mapping)
+            
+            # Converter tipos
+            numeric_columns = ['open_price', 'high_price', 'low_price', 
+                             'close_price', 'adjusted_close', 'volume']
+            
+            for col in numeric_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Adicionar metadados
+            df['symbol'] = symbol
+            df['date'] = df.index.date
+            
+            # Calcular indicadores técnicos básicos
+            df['sma_20'] = df['close_price'].rolling(window=20).mean()
+            df['sma_50'] = df['close_price'].rolling(window=50).mean()
+            
+            # RSI
+            delta = df['close_price'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['rsi'] = 100 - (100 / (1 + rs))
+            
+            # Retornos diários
+            df['daily_return'] = df['close_price'].pct_change()
+            
+            logger.info(f"🔄 Dados de {symbol} transformados ({len(df)} registros)")
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ Erro na transformação de {symbol}: {str(e)}")
+            return None
+    
+    def load_to_database(self, df: pd.DataFrame):
+        """
+        Carrega dados no banco SQLite
+        """
+        if df is None or df.empty:
+            return
+        
+        conn = sqlite3.connect(self.db_path)
+        
+        try:
+            symbol = df['symbol'].iloc[0]
+            
+            # Inserir/atualizar informações do ativo
+            asset_info = {
+                'symbol': symbol,
+                'name': f"{symbol} Stock",
+                'exchange': 'Unknown',
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            conn.execute('''
+                INSERT OR REPLACE INTO assets (symbol, name, exchange, updated_at)
+                VALUES (:symbol, :name, :exchange, :updated_at)
+            ''', asset_info)
+            
+            # Preparar dados de preços
+            price_data = df[['symbol', 'date', 'open_price', 'high_price', 
+                           'low_price', 'close_price', 'adjusted_close', 'volume']].copy()
+            
+            # Limpar dados existentes
+            conn.execute('DELETE FROM price_history WHERE symbol = ?', (symbol,))
+            
+            # Inserir dados históricos
+            price_data.to_sql('price_history', conn, if_exists='append', 
+                            index=False, method='multi')
+            
+            # Preparar indicadores técnicos
+            indicators = df[['symbol', 'date', 'sma_20', 'sma_50', 'rsi']].copy()
+            
+            # Limpar indicadores existentes
+            conn.execute('DELETE FROM technical_indicators WHERE symbol = ?', (symbol,))
+            
+            # Inserir indicadores
+            indicators.to_sql('technical_indicators', conn, if_exists='append', 
+                            index=False, method='multi')
+            
+            conn.commit()
+            logger.info(f"💾 Dados de {symbol} carregados no banco")
+            
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"❌ Erro ao carregar dados: {str(e)}")
+        finally:
+            conn.close()
+    
+    def run_etl_pipeline(self, symbols: List[str], delay: int = 12):
+        """
+        Executa pipeline ETL completo
+        
+        Args:
+            symbols: Lista de códigos de ativos
+            delay: Delay entre requests (evitar rate limiting)
+        """
+        logger.info(f"🚀 Iniciando pipeline ETL para {len(symbols)} ativos")
+        
+        successful = 0
+        failed = 0
+        
+        for i, symbol in enumerate(symbols, 1):
+            logger.info(f"📊 Processando {symbol} ({i}/{len(symbols)})...")
+            
+            # Extract (com fallback)
+            raw_data = self.extract_from_alpha_vantage(symbol)
+            if not raw_data:
+                raw_data = self.extract_from_yahoo_finance_fallback(symbol)
+            
+            if not raw_data:
+                logger.warning(f"⚠️ Não foi possível obter dados para {symbol}")
+                failed += 1
+                continue
+            
+            # Transform
+            df = self.transform_price_data(raw_data, symbol)
+            if df is None or df.empty:
+                failed += 1
+                continue
+            
+            # Load
+            self.load_to_database(df)
+            successful += 1
+            
+            # Rate limiting
+            if i < len(symbols):
+                logger.info(f"⏳ Aguardando {delay} segundos...")
+                time.sleep(delay)
+        
+        logger.info(f"✅ Pipeline concluído: {successful} sucessos, {failed} falhas")
+        return successful, failed
+    
+    def generate_portfolio_report(self) -> Dict:
+        """
+        Gera relatório executivo do portfolio
+        """
+        conn = sqlite3.connect(self.db_path)
+        
+        try:
+            # Query principal
+            query = """
+            SELECT 
+                p.symbol,
+                COUNT(*) as records_count,
+                MIN(p.date) as start_date,
+                MAX(p.date) as end_date,
+                AVG(p.close_price) as avg_price,
+                MIN(p.close_price) as min_price,
+                MAX(p.close_price) as max_price,
+                STDEV(p.close_price) as price_volatility,
+                AVG(p.volume) as avg_volume,
+                AVG(t.rsi) as avg_rsi,
+                
+                -- Preço atual vs inicial
+                (SELECT close_price FROM price_history p2 
+                 WHERE p2.symbol = p.symbol ORDER BY p2.date DESC LIMIT 1) as current_price,
+                (SELECT close_price FROM price_history p2 
+                 WHERE p2.symbol = p.symbol ORDER BY p2.date ASC LIMIT 1) as initial_price
+                
+            FROM price_history p
+            LEFT JOIN technical_indicators t ON p.symbol = t.symbol AND p.date = t.date
+            GROUP BY p.symbol
+            ORDER BY p.symbol
+            """
+            
+            df = pd.read_sql_query(query, conn)
+            
+            if not df.empty:
+                # Calcular métricas adicionais
+                df['total_return_pct'] = ((df['current_price'] - df['initial_price']) / 
+                                        df['initial_price'] * 100).round(2)
+                
+                # Análise de tendência baseada em RSI
+                df['trend_signal'] = df['avg_rsi'].apply(
+                    lambda x: 'COMPRA' if x < 30 else 'VENDA' if x > 70 else 'NEUTRO'
+                )
+                
+                # Relatório resumo
+                report = {
+                    'timestamp': datetime.now().isoformat(),
+                    'total_assets': len(df),
+                    'avg_return': df['total_return_pct'].mean(),
+                    'best_performer': df.loc[df['total_return_pct'].idxmax()]['symbol'],
+                    'worst_performer': df.loc[df['total_return_pct'].idxmin()]['symbol'],
+                    'assets_summary': df.to_dict('records')
+                }
+                
+                # Salvar relatório
+                with open('reports/portfolio_report.json', 'w') as f:
+                    json.dump(report, f, indent=2, default=str)
+                
+                # Exportar para Excel
+                df.to_excel('reports/portfolio_analysis.xlsx', index=False)
+                
+                logger.info("📊 Relatório executivo gerado com sucesso")
+                return report
+            
+        except Exception as e:
+            logger.error(f"❌ Erro na geração do relatório: {str(e)}")
+        finally:
+            conn.close()
+        
+        return {}
+
+def main():
+    """Função principal - Executa ETL completo"""
+    
+    # Lista de ativos para análise (pode usar .SA para ações brasileiras)
+    symbols = [
+        'AAPL',    # Apple
+        'MSFT',    # Microsoft  
+        'GOOGL',   # Google
+        'TSLA',    # Tesla
+        'NVDA',    # NVIDIA
+        'AMZN',    # Amazon
+        'META',    # Meta
+        'NFLX'     # Netflix
+    ]
+    
+    print("🚀 SISTEMA ETL PROFISSIONAL - DADOS FINANCEIROS REAIS")
+    print("=" * 60)
+    print("📡 Conectando com APIs: Alpha Vantage + Yahoo Finance")
+    print("🗄️ Banco de dados: SQLite com schema profissional")
+    print("📊 Indicadores: SMA, RSI, retornos, volatilidade")
+    print()
+    
+    # Inicializar ETL
+    etl = ETLFinanceiroReal()
+    
+    # Executar pipeline
+    successful, failed = etl.run_etl_pipeline(symbols, delay=5)  # 5s delay para demo
+    
+    if successful > 0:
+        # Gerar relatórios
+        print("\n📊 GERANDO RELATÓRIOS EXECUTIVOS...")
+        report = etl.generate_portfolio_report()
+        
+        if report:
+            print(f"\n🏆 === RELATÓRIO EXECUTIVO ===")
+            print(f"📈 Total de ativos analisados: {report['total_assets']}")
+            print(f"📊 Retorno médio do portfolio: {report['avg_return']:.2f}%")
+            print(f"🥇 Melhor performance: {report['best_performer']}")
+            print(f"📉 Pior performance: {report['worst_performer']}")
+            
+            print(f"\n💼 === ANÁLISE POR ATIVO ===")
+            for asset in report['assets_summary'][:5]:  # Mostrar top 5
+                symbol = asset['symbol']
+                return_pct = asset['total_return_pct']
+                trend = asset['trend_signal']
+                rsi = asset.get('avg_rsi', 0) or 0
+                
+                emoji = "🚀" if return_pct > 5 else "📈" if return_pct > 0 else "📉"
+                print(f"{emoji} {symbol}: {return_pct:+.2f}% | RSI: {rsi:.1f} | Sinal: {trend}")
+        
+        print(f"\n✅ PIPELINE EXECUTADO COM SUCESSO!")
+        print(f"🗄️ Banco de dados: data/financial_data.db")
+        print(f"📊 Relatório JSON: reports/portfolio_report.json") 
+        print(f"📋 Análise Excel: reports/portfolio_analysis.xlsx")
+        print(f"📝 Logs detalhados: logs/etl_pipeline.log")
+        
+    else:
+        print("\n❌ Nenhum ativo foi processado com sucesso.")
+        print("💡 Dica: Para usar dados reais, registre-se em alphavantage.co")
+        print("🔄 Alternativa: O sistema tentará Yahoo Finance automaticamente")
+
+if __name__ == "__main__":
+    main()

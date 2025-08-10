@@ -1,0 +1,185 @@
+# teste_api.py - Cliente para testar nossa API
+import requests
+import json
+from datetime import datetime
+
+class TesteAPIFinanceira:
+    """Cliente para testar nossa API profissionalmente"""
+    
+    def __init__(self, base_url="http://localhost:8000"):
+        self.base_url = base_url
+        print("🧪 TESTADOR DA API FINANCEIRA")
+        print("=" * 50)
+    
+    def testar_status(self):
+        """Testa se API está online"""
+        print("\n1️⃣ Testando status da API...")
+        try:
+            response = requests.get(f"{self.base_url}/")
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ API online! Versão: {data['version']}")
+                return True
+            else:
+                print(f"❌ API offline: {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"❌ Erro ao conectar: {str(e)}")
+            return False
+    
+    def testar_health_check(self):
+        """Testa health check"""
+        print("\n2️⃣ Testando health check...")
+        try:
+            response = requests.get(f"{self.base_url}/health")
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ Sistema saudável!")
+                print(f"   📊 Total de ações no banco: {data['total_acoes_banco']}")
+                return True
+            else:
+                print(f"❌ Health check falhou: {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"❌ Erro no health check: {str(e)}")
+            return False
+    
+    def testar_acao_individual(self, codigo="AAPL"):
+        """Testa extração de ação individual"""
+        print(f"\n3️⃣ Testando ação individual: {codigo}...")
+        try:
+            response = requests.get(f"{self.base_url}/acoes/{codigo}")
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ Dados de {codigo} extraídos!")
+                print(f"   📈 {data['nome']}: R$ {data['preco']} ({data['variacao']:+.2f}%)")
+                print(f"   📊 Volume: {data['volume']:,}")
+                print(f"   🔗 Fonte: {data['fonte']}")
+                return data
+            else:
+                print(f"❌ Erro ao obter {codigo}: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ Erro ao testar {codigo}: {str(e)}")
+            return None
+    
+    def testar_analise_portfolio(self):
+        """Testa análise completa de portfolio"""
+        print(f"\n4️⃣ Testando análise de portfolio...")
+        
+        portfolio_teste = {
+            "simbolos": ["AAPL", "MSFT", "PETR4.SA", "VALE3.SA"],
+            "incluir_historico": False
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/portfolio/analisar",
+                json=portfolio_teste,
+                timeout=60  # Timeout maior para processamento
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ Portfolio analisado com sucesso!")
+                
+                stats = data['estatisticas']
+                print(f"\n📊 ESTATÍSTICAS DO PORTFOLIO:")
+                print(f"   💰 Valor médio: R$ {stats['preco_medio']}")
+                print(f"   📈 Variação média: {stats['variacao_media']:+.2f}%")
+                print(f"   💹 Volume total: {stats['volume_total']:,}")
+                
+                perf = data['performance']
+                print(f"\n🏆 PERFORMANCE:")
+                print(f"   🥇 Melhor: {perf['melhor_acao']['codigo']} (+{perf['melhor_acao']['variacao']:.2f}%)")
+                print(f"   📉 Pior: {perf['pior_acao']['codigo']} ({perf['pior_acao']['variacao']:+.2f}%)")
+                
+                if data['recomendacoes']:
+                    print(f"\n💡 RECOMENDAÇÕES:")
+                    for rec in data['recomendacoes']:
+                        print(f"   {rec}")
+                
+                return data
+            else:
+                print(f"❌ Erro na análise: {response.status_code}")
+                print(f"   Detalhes: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Erro ao testar portfolio: {str(e)}")
+            return None
+    
+    def testar_historico(self):
+        """Testa consulta de histórico"""
+        print(f"\n5️⃣ Testando histórico do banco...")
+        try:
+            response = requests.get(f"{self.base_url}/portfolio/historico?limite=10")
+            if response.status_code == 200:
+                data = response.json()
+                print(f"✅ Histórico consultado!")
+                print(f"   📊 Total de registros: {data['total_registros']}")
+                
+                if data['dados']:
+                    print(f"   📅 Última atualização: {data['ultima_atualizacao']}")
+                    print(f"\n📋 ÚLTIMOS REGISTROS:")
+                    for i, registro in enumerate(data['dados'][:5], 1):
+                        print(f"   {i}. {registro['codigo']} - R$ {registro['preco']} ({registro['fonte']})")
+                
+                return data
+            else:
+                print(f"❌ Erro no histórico: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ Erro ao testar histórico: {str(e)}")
+            return None
+    
+    def executar_todos_testes(self):
+        """Executa bateria completa de testes"""
+        print("🚀 INICIANDO BATERIA COMPLETA DE TESTES")
+        print("=" * 50)
+        
+        resultados = {
+            "status": self.testar_status(),
+            "health": self.testar_health_check(),
+            "acao_individual": self.testar_acao_individual("AAPL"),
+            "portfolio": self.testar_analise_portfolio(),
+            "historico": self.testar_historico()
+        }
+        
+        print("\n" + "=" * 50)
+        print("📊 RESULTADO DOS TESTES:")
+        print("=" * 50)
+        
+        sucessos = sum(1 for v in resultados.values() if v)
+        total = len(resultados)
+        
+        print(f"✅ Sucessos: {sucessos}/{total}")
+        for teste, resultado in resultados.items():
+            status = "✅ PASSOU" if resultado else "❌ FALHOU"
+            print(f"   {teste}: {status}")
+        
+        if sucessos == total:
+            print(f"\n🎉 TODOS OS TESTES PASSARAM!")
+            print(f"🚀 Sua API está funcionando perfeitamente!")
+        else:
+            print(f"\n⚠️ Alguns testes falharam. Verifique se a API está rodando.")
+        
+        return resultados
+
+def main():
+    """Função principal de teste"""
+    testador = TesteAPIFinanceira()
+    
+    # Executar todos os testes
+    resultados = testador.executar_todos_testes()
+    
+    print("\n" + "=" * 50)
+    print("🎯 PRÓXIMOS PASSOS:")
+    print("=" * 50)
+    print("1. Acesse http://localhost:8000/docs para ver a documentação")
+    print("2. Teste endpoints manualmente no Swagger UI")
+    print("3. Verifique arquivos gerados em data/ e reports/")
+    print("4. Pronto para GitHub! 🚀")
+
+if __name__ == "__main__":
+    main()

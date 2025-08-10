@@ -1,0 +1,85 @@
+# === PYTHON ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# === VIRTUAL ENVIRONMENTS ===
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.poetry/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === JUPYTER NOTEBOOKS ===
+.ipynb_checkpoints
+
+# === PYTEST ===
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# === DADOS SENSÍVEIS ===
+*.db
+*.sqlite
+*.sqlite3
+data/raw/
+data/processed/
+logs/
+reports/
+.env.local
+.env.production
+config/secrets.py
+
+# === API KEYS ===
+*api_key*
+*secret*
+*token*
+.env.*
+
+# === SISTEMA ===
+.DS_Store
+Thumbs.db
+.cache/
+
+# === DOCUMENTAÇÃO ===
+docs/_build/
+
+# === TEMPORÁRIOS ===
+*.tmp
+*.temp
+temp/
+tmp/
